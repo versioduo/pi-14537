@@ -113,8 +113,8 @@ public:
 
     // LED color.
     struct {
-      uint8_t h{15};
-      uint8_t s{40};
+      uint8_t h{10};
+      uint8_t s{100};
       uint8_t v{100};
     } color;
   } config{};
