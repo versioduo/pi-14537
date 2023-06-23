@@ -10,7 +10,7 @@
 #include <V2MIDI.h>
 #include <V2Music.h>
 
-V2DEVICE_METADATA("de.vogelkuerstner.pi-14537", 52, "versioduo:samd:control");
+V2DEVICE_METADATA("de.vogelkuerstner.pi-14537", 53, "versioduo:samd:control");
 
 static V2LED::WS2812 LED(2, PIN_LED_WS2812, &sercom2, SPI_PAD_0_SCK_1, PIO_SERCOM);
 static V2LED::WS2812 LEDExt(88, PIN_LED_WS2812_EXT, &sercom1, SPI_PAD_0_SCK_1, PIO_SERCOM);
@@ -19,7 +19,7 @@ static V2Link::Port Socket(&SerialSocket);
 // The button switches the state with a multi-click long-press.
 static class Manual {
 public:
-  enum class Mode { Notes, Song, Test, Tune, Turn } mode{};
+  enum class Mode { Notes, Song, Test } mode{};
   Mode getMode() const {
     return _mode;
   }
@@ -79,7 +79,7 @@ public:
   enum class Program : uint8_t {
     Standard,
     Damper,
-    TriggerDamper,
+    Dampened,
     Calibration,
     _count,
   };
@@ -119,17 +119,17 @@ public:
     } color;
   } config{};
 
-  void setProgram(Program number) {
-    _program = number;
+  void setProgram(uint8_t channel, Program number) {
+    _channels[channel].program = number;
 
     switch (Manual.getMode()) {
       case Manual::Mode::Notes:
-        Manual.setColor(_programs[(uint8_t)_program].color);
+        Manual.setColor(_programs[(uint8_t)_channels[channel].program].color);
         break;
 
       case Manual::Mode::Song:
       case Manual::Mode::Test:
-        Manual.splashColor(_programs[(uint8_t)_program].color);
+        Manual.splashColor(_programs[(uint8_t)_channels[channel].program].color);
         break;
     }
   }
@@ -196,7 +196,7 @@ public:
     light(index, velocity);
   }
 
-  void playTriggerDamper(uint8_t note, uint8_t velocity, uint8_t offVelocity) {
+  void playDampened(uint8_t note, uint8_t velocity, uint8_t offVelocity) {
     const uint8_t index = note - notes.start;
 
     if (velocity == 0) {
@@ -241,7 +241,7 @@ public:
 
     led.flash(0.03, 0.3);
 
-    switch (_program) {
+    switch (_channels[channel].program) {
       case Program::Standard:
         playDefault(note, velocity, offVelocity);
         break;
@@ -250,8 +250,8 @@ public:
         playDamper(note, velocity, offVelocity);
         break;
 
-      case Program::TriggerDamper:
-        playTriggerDamper(note, velocity, offVelocity);
+      case Program::Dampened:
+        playDampened(note, velocity, offVelocity);
         break;
 
       case Program::Calibration:
@@ -277,7 +277,7 @@ public:
     _led.s = (float)config.color.s / 127.f;
     _led.v = (float)config.color.v / 127.f;
 
-    Manual.setMode(Manual::Mode::Notes, _programs[(uint8_t)_program].color);
+    Manual.setMode(Manual::Mode::Notes, _programs[(uint8_t)_channels[0].program].color);
     LEDExt.reset();
 
     for (uint8_t i = 0; i < notes.count; i++) {
@@ -304,22 +304,25 @@ private:
     float v;
   } _led{};
 
-  const struct {
-    const char *name;
-    V2Color::Hue color;
-  } _programs[(uint8_t)Program::_count]{
-    [(uint8_t)Program::Standard]      = {.name{"Standard"}, .color{V2Color::Orange}},
-    [(uint8_t)Program::Damper]        = {.name{"Damper"}, .color{V2Color::Cyan}},
-    [(uint8_t)Program::TriggerDamper] = {.name{"Trigger + Damper"}, .color{V2Color::Green}},
-    [(uint8_t)Program::Calibration]   = {.name{"Calibration"}, .color{V2Color::Magenta}},
-  };
-  Program _program{};
-  uint16_t _bank{};
-
   uint8_t _volume{100};
   uint8_t _sustain{};
   V2Music::Priority<16> _sustainPriority{};
   float _rainbow{};
+
+  const struct {
+    const char *name;
+    V2Color::Hue color;
+  } _programs[(uint8_t)Program::_count]{
+    [(uint8_t)Program::Standard]    = {.name{"Standard"}, .color{V2Color::Orange}},
+    [(uint8_t)Program::Damper]      = {.name{"Damper"}, .color{V2Color::Cyan}},
+    [(uint8_t)Program::Dampened]    = {.name{"Dampened"}, .color{V2Color::Green}},
+    [(uint8_t)Program::Calibration] = {.name{"Calibration"}, .color{V2Color::Magenta}},
+  };
+
+  struct {
+    Program program{};
+    uint16_t bank{};
+  } _channels[16];
 
   struct {
     bool playing;
@@ -350,12 +353,15 @@ private:
   void handleReset() override {
     _lastUsec = 0;
     _force.reset();
-    _program = Program::Standard;
-    _bank    = 0;
     _volume  = 100;
     _sustain = 0;
     _sustainPriority.reset();
     _rainbow = 0;
+
+    for (uint8_t i = 0; i < 16; i++) {
+      _channels[i].program = Program::Standard;
+      _channels[i].bank    = 0;
+    }
 
     _led.h = (float)config.color.h / 127.f * 360.f;
     _led.s = (float)config.color.s / 127.f;
@@ -366,7 +372,7 @@ private:
       _notesPriority[i].reset();
     }
 
-    Manual.setMode(Manual::Mode::Notes, _programs[(uint8_t)_program].color);
+    Manual.setMode(Manual::Mode::Notes, _programs[(uint8_t)_channels[0].program].color);
     LEDExt.reset();
 
     const uint8_t nChildren = 1 + (notes.count / 8);
@@ -491,23 +497,23 @@ private:
   }
 
   void handleProgramChange(uint8_t channel, uint8_t program) override {
-    if (channel != 0)
-      return;
-
     if (program != V2MIDI::GM::Program::AcousticGrandPiano)
       return;
 
-    if (_bank >= (uint8_t)Program::_count)
+    if (_channels[channel].bank >= (uint8_t)Program::_count)
       return;
 
-    setProgram((Program)_bank);
+    setProgram(channel, (Program)_channels[channel].bank);
   }
 
   void handleControlChange(uint8_t channel, uint8_t controller, uint8_t value) override {
     switch (controller) {
-      case V2MIDI::CC::AllSoundOff:
-      case V2MIDI::CC::AllNotesOff:
-        allNotesOff();
+      case V2MIDI::CC::BankSelect:
+        _channels[channel].bank = value << 7;
+        return;
+
+      case V2MIDI::CC::BankSelectLSB:
+        _channels[channel].bank |= value;
         return;
 
       case (uint8_t)CC::SustainPedal:
@@ -523,6 +529,11 @@ private:
 
         setSustain(value);
         return;
+
+      case V2MIDI::CC::AllSoundOff:
+      case V2MIDI::CC::AllNotesOff:
+        allNotesOff();
+        return;
     }
 
     if (channel != 0)
@@ -530,14 +541,6 @@ private:
 
     // Controls for the main channel only.
     switch (controller) {
-      case V2MIDI::CC::BankSelect:
-        _bank = value << 7;
-        break;
-
-      case V2MIDI::CC::BankSelectLSB:
-        _bank |= value;
-        break;
-
       case (uint8_t)CC::Volume:
         _volume = value;
         break;
@@ -688,7 +691,7 @@ private:
       jsonProgram["name"]    = _programs[i].name;
       jsonProgram["number"]  = V2MIDI::GM::Program::AcousticGrandPiano;
       jsonProgram["bank"]    = i;
-      if (i == (uint8_t)_program)
+      if (i == (uint8_t)_channels[0].program)
         jsonProgram["selected"] = true;
     }
 
@@ -901,7 +904,7 @@ private:
         break;
 
       case 1 ... static_cast<uint8_t>(Device::Program::_count):
-        Device.setProgram(static_cast<Device::Program>(count - 1));
+        Device.setProgram(0, static_cast<Device::Program>(count - 1));
         break;
     }
   }
