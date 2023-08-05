@@ -10,7 +10,7 @@
 #include <V2MIDI.h>
 #include <V2Music.h>
 
-V2DEVICE_METADATA("de.vogelkuerstner.pi-14537", 53, "versioduo:samd:control");
+V2DEVICE_METADATA("de.vogelkuerstner.pi-14537", 54, "versioduo:samd:control");
 
 static V2LED::WS2812 LED(2, PIN_LED_WS2812, &sercom2, SPI_PAD_0_SCK_1, PIO_SERCOM);
 static V2LED::WS2812 LEDExt(88, PIN_LED_WS2812_EXT, &sercom1, SPI_PAD_0_SCK_1, PIO_SERCOM);
@@ -152,82 +152,6 @@ public:
     }
   }
 
-  void playDefault(uint8_t note, uint8_t velocity, uint8_t offVelocity) {
-    const uint8_t index = note - notes.start;
-
-    if (velocity == 0) {
-      light(index, 0);
-
-      if (_sustain < 64)
-        sendDamper(index, 0, 0);
-      else
-        _notes[index].sustain = true;
-
-      _notes[index].playing = false;
-      return;
-    }
-
-    if (_volume > 0) {
-      float fraction = getFractionCalibrated(index, velocity);
-      fraction       = adjustVolume(fraction);
-
-      float watts;
-      float seconds;
-      getPulse(fraction, watts, seconds);
-      sendDamper(index, 5, 20);
-      sendTrigger(index, watts, seconds);
-    }
-
-    _notes[index].playing = true;
-    light(index, velocity);
-  }
-
-  void playDamper(uint8_t note, uint8_t velocity, uint8_t offVelocity) {
-    const uint8_t index = note - notes.start;
-
-    if (velocity == 0) {
-      light(index, 0);
-      return;
-    }
-
-    if (_volume > 0)
-      sendDamper(index, 4, 0.01, false);
-
-    light(index, velocity);
-  }
-
-  void playDampened(uint8_t note, uint8_t velocity, uint8_t offVelocity) {
-    const uint8_t index = note - notes.start;
-
-    if (velocity == 0) {
-      light(index, 0);
-      return;
-    }
-
-    if (_volume > 0) {
-      float fraction = getFractionCalibrated(index, velocity);
-      fraction       = adjustVolume(fraction);
-
-      float watts;
-      float seconds;
-      getPulse(fraction, watts, seconds);
-      sendTrigger(index, watts, seconds);
-    }
-
-    light(index, velocity);
-  }
-
-  void playCalibration(uint8_t note, uint8_t velocity, uint8_t offVelocity) {
-    const uint8_t index = note - notes.start;
-
-    float watts;
-    float seconds;
-    const float fraction = getFraction(velocity);
-    getPulse(fraction, watts, seconds);
-    sendDamper(index, 3.5, 0.5);
-    sendTrigger(index, watts, seconds);
-  }
-
   void play(uint8_t channel, uint8_t note, uint8_t velocity, uint8_t offVelocity = 0) {
     if (note < notes.start || note > (notes.start + notes.count - 1))
       return;
@@ -243,19 +167,19 @@ public:
 
     switch (_channels[channel].program) {
       case Program::Standard:
-        playDefault(note, velocity, offVelocity);
+        playDefault(channel, note, velocity, offVelocity);
         break;
 
       case Program::Damper:
-        playDamper(note, velocity, offVelocity);
+        playDamper(channel, note, velocity, offVelocity);
         break;
 
       case Program::Dampened:
-        playDampened(note, velocity, offVelocity);
+        playDampened(channel, note, velocity, offVelocity);
         break;
 
       case Program::Calibration:
-        playCalibration(note, velocity, offVelocity);
+        playCalibration(channel, note, velocity, offVelocity);
         break;
     }
   }
@@ -268,22 +192,7 @@ public:
       return;
     }
 
-    _volume  = 100;
-    _sustain = 0;
-    _sustainPriority.reset();
-    _rainbow = 0;
-
-    _led.h = (float)config.color.h / 127.f * 360.f;
-    _led.s = (float)config.color.s / 127.f;
-    _led.v = (float)config.color.v / 127.f;
-
-    Manual.setMode(Manual::Mode::Notes, _programs[(uint8_t)_channels[0].program].color);
-    LEDExt.reset();
-
-    for (uint8_t i = 0; i < notes.count; i++) {
-      _notes[i] = {};
-      _notesPriority[i].reset();
-    }
+    setDefaultValues();
 
     const uint8_t nChildren = 1 + (notes.count / 8);
     for (uint8_t i = 0; i < nChildren; i++) {
@@ -296,13 +205,6 @@ public:
 private:
   unsigned long _lastUsec{};
   V2Music::ForcedStop _force;
-
-  // LED color.
-  struct {
-    float h;
-    float s;
-    float v;
-  } _led{};
 
   uint8_t _volume{100};
   uint8_t _sustain{};
@@ -322,6 +224,13 @@ private:
   struct {
     Program program{};
     uint16_t bank{};
+
+    // LED color.
+    struct {
+      float h;
+      float s;
+      float v;
+    } led{};
   } _channels[16];
 
   struct {
@@ -350,30 +259,33 @@ private:
     }
   }
 
-  void handleReset() override {
-    _lastUsec = 0;
-    _force.reset();
+  void setDefaultValues() {
     _volume  = 100;
     _sustain = 0;
     _sustainPriority.reset();
     _rainbow = 0;
 
-    for (uint8_t i = 0; i < 16; i++) {
-      _channels[i].program = Program::Standard;
-      _channels[i].bank    = 0;
+    for (uint8_t ch = 0; ch < 16; ch++) {
+      _channels[ch].program = Program::Standard;
+      _channels[ch].bank    = 0;
+
+      _channels[ch].led.h = (float)config.color.h / 127.f * 360.f;
+      _channels[ch].led.s = (float)config.color.s / 127.f;
+      _channels[ch].led.v = (float)config.color.v / 127.f;
     }
 
-    _led.h = (float)config.color.h / 127.f * 360.f;
-    _led.s = (float)config.color.s / 127.f;
-    _led.v = (float)config.color.v / 127.f;
+    Manual.setMode(Manual::Mode::Notes, _programs[(uint8_t)_channels[0].program].color);
+    LEDExt.reset();
 
     for (uint8_t i = 0; i < notes.count; i++) {
       _notes[i] = {};
       _notesPriority[i].reset();
     }
+  }
 
-    Manual.setMode(Manual::Mode::Notes, _programs[(uint8_t)_channels[0].program].color);
-    LEDExt.reset();
+  void handleReset() override {
+    _force.reset();
+    setDefaultValues();
 
     const uint8_t nChildren = 1 + (notes.count / 8);
     for (uint8_t i = 0; i < nChildren; i++) {
@@ -391,12 +303,12 @@ private:
     }
   }
 
-  void light(uint8_t index, uint8_t velocity) {
+  void light(uint8_t channel, uint8_t index, uint8_t velocity) {
     if (velocity > 0) {
       // Brightness depending on the velocity
       const float fraction   = (float)velocity / 127.f;
-      const float brightness = 0.5f + (0.5f * fraction * _led.v);
-      LEDExt.setHSV(index, _led.h, _led.s, _led.v * brightness);
+      const float brightness = 0.5f + (0.5f * fraction);
+      LEDExt.setHSV(index, _channels[channel].led.h, _channels[channel].led.s, _channels[channel].led.v * brightness);
 
     } else
       LEDExt.setBrightness(index, 0);
@@ -436,6 +348,82 @@ private:
 
     const float range = (float)(_volume - 100) / 27.f;
     return powf(fraction, 1 - (0.5f * range));
+  }
+
+  void playDefault(uint8_t channel, uint8_t note, uint8_t velocity, uint8_t offVelocity) {
+    const uint8_t index = note - notes.start;
+
+    if (velocity == 0) {
+      light(channel, index, 0);
+
+      if (_sustain < 64)
+        sendDamper(index, 0, 0);
+      else
+        _notes[index].sustain = true;
+
+      _notes[index].playing = false;
+      return;
+    }
+
+    if (_volume > 0) {
+      float fraction = getFractionCalibrated(index, velocity);
+      fraction       = adjustVolume(fraction);
+
+      float watts;
+      float seconds;
+      getPulse(fraction, watts, seconds);
+      sendDamper(index, 5, 20);
+      sendTrigger(index, watts, seconds);
+    }
+
+    _notes[index].playing = true;
+    light(channel, index, velocity);
+  }
+
+  void playDamper(uint8_t channel, uint8_t note, uint8_t velocity, uint8_t offVelocity) {
+    const uint8_t index = note - notes.start;
+
+    if (velocity == 0) {
+      light(channel, index, 0);
+      return;
+    }
+
+    if (_volume > 0)
+      sendDamper(index, 4, 0.01, false);
+
+    light(channel, index, velocity);
+  }
+
+  void playDampened(uint8_t channel, uint8_t note, uint8_t velocity, uint8_t offVelocity) {
+    const uint8_t index = note - notes.start;
+
+    if (velocity == 0) {
+      light(channel, index, 0);
+      return;
+    }
+
+    if (_volume > 0) {
+      float fraction = getFractionCalibrated(index, velocity);
+      fraction       = adjustVolume(fraction);
+
+      float watts;
+      float seconds;
+      getPulse(fraction, watts, seconds);
+      sendTrigger(index, watts, seconds);
+    }
+
+    light(channel, index, velocity);
+  }
+
+  void playCalibration(uint8_t channel, uint8_t note, uint8_t velocity, uint8_t offVelocity) {
+    const uint8_t index = note - notes.start;
+
+    float watts;
+    float seconds;
+    const float fraction = getFraction(velocity);
+    getPulse(fraction, watts, seconds);
+    sendDamper(index, 3.5, 0.5);
+    sendTrigger(index, watts, seconds);
   }
 
   void getPulse(float fraction, float &watts, float &seconds) {
@@ -507,6 +495,7 @@ private:
   }
 
   void handleControlChange(uint8_t channel, uint8_t controller, uint8_t value) override {
+    // Controls for a specific channel.
     switch (controller) {
       case V2MIDI::CC::BankSelect:
         _channels[channel].bank = value << 7;
@@ -516,6 +505,7 @@ private:
         _channels[channel].bank |= value;
         return;
 
+      // Sustain is a global state, but the higher channels override the actual value.
       case (uint8_t)CC::SustainPedal:
         if (!_sustainPriority.set(value == 0 ? -1 : value, channel))
           return;
@@ -529,6 +519,18 @@ private:
 
         setSustain(value);
         return;
+
+      case (uint8_t)CC::Color:
+        _channels[channel].led.h = (float)value / 127.f * 360.f;
+        break;
+
+      case (uint8_t)CC::Saturation:
+        _channels[channel].led.s = (float)value / 127.f;
+        break;
+
+      case (uint8_t)CC::Brightness:
+        _channels[channel].led.v = (float)value / 127.f;
+        break;
 
       case V2MIDI::CC::AllSoundOff:
       case V2MIDI::CC::AllNotesOff:
@@ -545,18 +547,9 @@ private:
         _volume = value;
         break;
 
-      case (uint8_t)CC::Color:
-        _led.h = (float)value / 127.f * 360.f;
-        break;
-
-      case (uint8_t)CC::Saturation:
-        _led.s = (float)value / 127.f;
-        break;
-
       case (uint8_t)CC::Brightness:
-        _led.v = (float)value / 127.f;
         if (_rainbow > 0.f)
-          LEDExt.rainbow(1, 4.5f - (_rainbow * 4.f), _led.v);
+          LEDExt.rainbow(1, 4.5f - (_rainbow * 4.f), _channels[0].led.v);
         break;
 
       case (uint8_t)CC::Rainbow:
@@ -564,7 +557,7 @@ private:
         if (_rainbow <= 0.f)
           LEDExt.reset();
         else
-          LEDExt.rainbow(1, 4.5f - (_rainbow * 4.f), _led.v);
+          LEDExt.rainbow(1, 4.5f - (_rainbow * 4.f), _channels[0].led.v);
         break;
     }
   }
@@ -667,75 +660,85 @@ private:
       uint8_t color = jsonLed[0];
       if (color > 127)
         color = 127;
-      config.color.h = color;
-      _led.h         = (float)color / 127.f * 360.f;
+      config.color.h     = color;
+      _channels[0].led.h = (float)color / 127.f * 360.f;
 
       uint8_t saturation = jsonLed[1];
       if (saturation > 127)
         saturation = 127;
-      config.color.s = saturation;
-      _led.s         = (float)saturation / 127.f;
+      config.color.s     = saturation;
+      _channels[0].led.s = (float)saturation / 127.f;
 
       uint8_t brightness = jsonLed[2];
       if (brightness > 127)
         brightness = 127;
-      config.color.v = brightness;
-      _led.v         = (float)brightness / 127.f;
+      config.color.v     = brightness;
+      _channels[0].led.v = (float)brightness / 127.f;
     }
   }
 
   void exportInput(JsonObject json) override {
-    JsonArray jsonPrograms = json.createNestedArray("programs");
-    for (uint8_t i = 0; i < (uint8_t)Program::_count; i++) {
-      JsonObject jsonProgram = jsonPrograms.createNestedObject();
-      jsonProgram["name"]    = _programs[i].name;
-      jsonProgram["number"]  = V2MIDI::GM::Program::AcousticGrandPiano;
-      jsonProgram["bank"]    = i;
-      if (i == (uint8_t)_channels[0].program)
-        jsonProgram["selected"] = true;
-    }
+    JsonArray jsonChannels = json.createNestedArray("channels");
+    for (uint8_t ch = 0; ch < 16; ch++) {
+      JsonObject jsonChannel = jsonChannels.createNestedObject();
+      jsonChannel["number"]  = ch;
 
-    JsonArray jsonControllers = json.createNestedArray("controllers");
-    {
-      JsonObject jsonController = jsonControllers.createNestedObject();
-      jsonController["name"]    = "Volume";
-      jsonController["number"]  = (uint8_t)CC::Volume;
-      jsonController["value"]   = _volume;
-    }
-    {
-      JsonObject jsonController = jsonControllers.createNestedObject();
-      jsonController["name"]    = "Sustain Pedal";
-      jsonController["number"]  = (uint8_t)CC::SustainPedal;
-      jsonController["value"]   = _sustain;
-    }
-    {
-      JsonObject jsonController = jsonControllers.createNestedObject();
-      jsonController["name"]    = "Hue";
-      jsonController["number"]  = (uint8_t)CC::Color;
-      jsonController["value"]   = (uint8_t)(_led.h / 360.f * 127.f);
-    }
-    {
-      JsonObject jsonController = jsonControllers.createNestedObject();
-      jsonController["name"]    = "Saturation";
-      jsonController["number"]  = (uint8_t)CC::Saturation;
-      jsonController["value"]   = (uint8_t)(_led.s * 127.f);
-    }
-    {
-      JsonObject jsonController = jsonControllers.createNestedObject();
-      jsonController["name"]    = "Brightness";
-      jsonController["number"]  = (uint8_t)CC::Brightness;
-      jsonController["value"]   = (uint8_t)(_led.v * 127.f);
-    }
-    {
-      JsonObject jsonController = jsonControllers.createNestedObject();
-      jsonController["name"]    = "Rainbow";
-      jsonController["number"]  = (uint8_t)CC::Rainbow;
-      jsonController["value"]   = (uint8_t)(_rainbow * 127.f);
-    }
+      JsonArray jsonPrograms = jsonChannel.createNestedArray("programs");
+      for (uint8_t i = 0; i < (uint8_t)Program::_count; i++) {
+        JsonObject jsonProgram = jsonPrograms.createNestedObject();
+        jsonProgram["name"]    = _programs[i].name;
+        jsonProgram["number"]  = V2MIDI::GM::Program::AcousticGrandPiano;
+        jsonProgram["bank"]    = i;
+        if (i == (uint8_t)_channels[ch].program)
+          jsonProgram["selected"] = true;
+      }
 
-    JsonObject jsonChromatic = json.createNestedObject("chromatic");
-    jsonChromatic["start"]   = notes.start;
-    jsonChromatic["count"]   = notes.count;
+      JsonArray jsonControllers = jsonChannel.createNestedArray("controllers");
+      if (ch == 0) {
+        {
+          JsonObject jsonController = jsonControllers.createNestedObject();
+          jsonController["name"]    = "Volume";
+          jsonController["number"]  = (uint8_t)CC::Volume;
+          jsonController["value"]   = _volume;
+        }
+        {
+          JsonObject jsonController = jsonControllers.createNestedObject();
+          jsonController["name"]    = "Sustain Pedal";
+          jsonController["number"]  = (uint8_t)CC::SustainPedal;
+          jsonController["value"]   = _sustain;
+        }
+      }
+
+      {
+        JsonObject jsonController = jsonControllers.createNestedObject();
+        jsonController["name"]    = "Hue";
+        jsonController["number"]  = (uint8_t)CC::Color;
+        jsonController["value"]   = (uint8_t)(_channels[ch].led.h / 360.f * 127.f);
+      }
+      {
+        JsonObject jsonController = jsonControllers.createNestedObject();
+        jsonController["name"]    = "Saturation";
+        jsonController["number"]  = (uint8_t)CC::Saturation;
+        jsonController["value"]   = (uint8_t)(_channels[ch].led.s * 127.f);
+      }
+      {
+        JsonObject jsonController = jsonControllers.createNestedObject();
+        jsonController["name"]    = "Brightness";
+        jsonController["number"]  = (uint8_t)CC::Brightness;
+        jsonController["value"]   = (uint8_t)(_channels[ch].led.v * 127.f);
+      }
+
+      if (ch == 0) {
+        JsonObject jsonController = jsonControllers.createNestedObject();
+        jsonController["name"]    = "Rainbow";
+        jsonController["number"]  = (uint8_t)CC::Rainbow;
+        jsonController["value"]   = (uint8_t)(_rainbow * 127.f);
+      }
+
+      JsonObject jsonChromatic = jsonChannel.createNestedObject("chromatic");
+      jsonChromatic["start"]   = notes.start;
+      jsonChromatic["count"]   = notes.count;
+    }
   }
 
   virtual void exportSystemMIDIFile(JsonObject json);
