@@ -1,6 +1,3 @@
-// © Kay Sievers <kay@versioduo.com>, 2021-2024
-// SPDX-License-Identifier: Apache-2.0
-
 #include "MIDISong.h"
 #include <V2Buttons.h>
 #include <V2Color.h>
@@ -14,7 +11,7 @@ V2DEVICE_METADATA("de.vogelkuerstner.pi-14537", 56, "versioduo:samd:control");
 
 static V2LED::WS2812 LED(2, PIN_LED_WS2812, &sercom2, SPI_PAD_0_SCK_1, PIO_SERCOM);
 static V2LED::WS2812 LEDExt(88, PIN_LED_WS2812_EXT, &sercom1, SPI_PAD_0_SCK_1, PIO_SERCOM);
-static V2Link::Port Socket(&SerialSocket);
+static V2Link::Port  Socket(&SerialSocket);
 
 // The button switches the state with a multi-click long-press.
 static class Manual {
@@ -205,16 +202,16 @@ private:
 
   struct {
     uint32_t usec{};
-    bool notes{};
+    bool     notes{};
   } _timeout;
 
-  uint8_t _volume{100};
-  uint8_t _sustain{};
+  uint8_t               _volume{100};
+  uint8_t               _sustain{};
   V2Music::Priority<16> _sustainPriority{};
-  float _rainbow{};
+  float                 _rainbow{};
 
   const struct {
-    const char *name;
+    const char*  name;
     V2Color::Hue color;
   } _programs[(uint8_t)Program::_count]{
     [(uint8_t)Program::Standard]    = {.name{"Standard"}, .color{V2Color::Orange}},
@@ -224,7 +221,7 @@ private:
   };
 
   struct {
-    Program program{};
+    Program  program{};
     uint16_t bank{};
 
     // LED color.
@@ -337,8 +334,9 @@ private:
       const float brightness = 0.5f + (0.5f * fraction);
       LEDExt.setHSV(index, _channels[channel].led.h, _channels[channel].led.s, _channels[channel].led.v * brightness);
 
-    } else
+    } else {
       LEDExt.setBrightness(index, 0);
+    }
   }
 
   float getFraction(uint8_t velocity) {
@@ -438,8 +436,8 @@ private:
 
   void playCalibration(uint8_t channel, uint8_t index, uint8_t velocity) {
     if (velocity > 0) {
-      float watts;
-      float seconds;
+      float       watts;
+      float       seconds;
       const float fraction = getFraction(velocity);
       getPulse(fraction, watts, seconds);
       sendDamper(index, 3.5, 0.5);
@@ -449,7 +447,7 @@ private:
     light(channel, index, velocity);
   }
 
-  void getPulse(float fraction, float &watts, float &seconds) {
+  void getPulse(float fraction, float& watts, float& seconds) {
     static constexpr struct {
       struct {
         float watts{2.5};
@@ -472,7 +470,7 @@ private:
     const uint8_t child = index / 16;
     const uint8_t port  = index % 16;
 
-    V2Link::Packet packet{};
+    V2Link::Packet        packet{};
     V2Link::Packet::Pulse pulse{
       .port{port},
       .watts{watts},
@@ -620,8 +618,8 @@ private:
     JsonArray jsonCalibration = json["calibration"].to<JsonArray>();
     for (uint8_t i = 0; i < notes.count; i++) {
       JsonObject note = jsonCalibration.add<JsonObject>();
-      uint8_t min     = config.calibration[i].min;
-      uint8_t max     = config.calibration[i].max;
+      uint8_t    min  = config.calibration[i].min;
+      uint8_t    max  = config.calibration[i].max;
 
       // The default values are all 0 when no configuration is stored.
       if (min == 0)
@@ -774,7 +772,7 @@ private:
 static class MIDIFile : public V2MIDI::File::Tracks {
 public:
   MIDIFile() : V2MIDI::File::Tracks(MIDISong) {}
-  bool handleSend(uint16_t track, V2MIDI::Packet *packet) {
+  bool handleSend(uint16_t track, V2MIDI::Packet* packet) {
     Device.dispatch(&Device.usb.midi, packet);
     return true;
   }
@@ -791,7 +789,7 @@ public:
 
 void Device::exportSystemMIDIFile(JsonObject json) {
   JsonObject jsonTrack = json["track"].to<JsonObject>();
-  char s[128];
+  char       s[128];
   if (MIDIFile.copyTag(V2MIDI::File::Event::Meta::Title, s, sizeof(s)) > 0)
     jsonTrack["title"] = s;
 
@@ -828,7 +826,7 @@ private:
   V2MIDI::Packet _midi{};
 
   // Forward children device events to the host
-  void receiveSocket(V2Link::Packet *packet) override {
+  void receiveSocket(V2Link::Packet* packet) override {
     if (packet->getType() == V2Link::Packet::Type::MIDI) {
       uint8_t address = packet->getAddress();
       if (address == 0x0f)
@@ -875,9 +873,9 @@ public:
   }
 
 private:
-  bool _enabled{};
-  uint8_t _velocity{};
-  uint8_t _note{};
+  bool          _enabled{};
+  uint8_t       _velocity{};
+  uint8_t       _note{};
   unsigned long _usec{};
   unsigned long _resetUsec{};
 
