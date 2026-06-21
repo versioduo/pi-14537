@@ -836,7 +836,7 @@ private:
         return;
 
       if (Device.usb.midi.connected()) {
-        packet->receive(&_midi);
+        packet->copyTo(_midi);
         _midi.setPort(address + 1);
         Device.usb.midi.send(&_midi);
       }
