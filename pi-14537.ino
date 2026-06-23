@@ -6,7 +6,7 @@
 #include <V2MIDI.h>
 #include <V2Music.h>
 
-V2DEVICE_METADATA("de.vogelkuerstner.pi-14537", 59, "versioduo:samd:control");
+V2DEVICE_METADATA("de.vogelkuerstner.pi-14537", 60, "versioduo:samd:control");
 
 static V2LED::WS2812 LED(2, PIN_LED_WS2812, &sercom2, SPI_PAD_0_SCK_1, PIO_SERCOM);
 static V2LED::WS2812 LEDExt(88, PIN_LED_WS2812_EXT, &sercom1, SPI_PAD_0_SCK_1, PIO_SERCOM);
@@ -191,9 +191,9 @@ public:
 
     const uint8_t nChildren = 1 + (notes.count / 8);
     for (uint8_t i = 0; i < nChildren; i++) {
-      _midi.setPort(i);
+      _midi.port = i;
       _midi.setControlChange(0, V2MIDI::CC::AllNotesOff);
-      Socket.send(&_midi);
+      Socket.send(_midi);
     }
   }
 
@@ -317,9 +317,9 @@ private:
 
     const uint8_t nChildren = 1 + (notes.count / 8);
     for (uint8_t i = 0; i < nChildren; i++) {
-      _midi.setPort(i);
+      _midi.port = i;
       _midi.setSystem(V2MIDI::Packet::Status::SystemReset);
-      Socket.send(&_midi);
+      Socket.send(_midi);
     }
   }
 
@@ -470,7 +470,7 @@ private:
     const uint8_t child = index / 16;
     const uint8_t port  = index % 16;
 
-    V2Link::Packet        packet{};
+    V2Link::Packet        packet;
     V2Link::Packet::Pulse pulse{
       .port{port},
       .watts{watts},
@@ -478,8 +478,9 @@ private:
       .fadeIn{fadeIn},
       .fadeOut{fadeOut},
     };
-    packet.setPulse(&pulse);
-    Socket.send(child, &packet);
+    packet.setPulse(pulse);
+    packet.address = child;
+    Socket.send(packet);
   }
 
   void sendTrigger(uint8_t index, float watts, float seconds) {
@@ -804,15 +805,16 @@ void Device::exportSystemMIDIFile(JsonObject json) {
 static class MIDI {
 public:
   void loop() {
-    if (!Device.usb.midi.receive(&_midi))
+    if (!Device.usb.midi.receive(_midi))
       return;
 
-    if (_midi.getPort() == 0) {
+    if (_midi.port == 0) {
       Device.dispatch(&Device.usb.midi, &_midi);
 
     } else {
-      _midi.setPort(_midi.getPort() - 1);
-      Socket.send(&_midi);
+      V2Link::Packet p(_midi.port - 1, _midi);
+      p.midi.port = 0;
+      Socket.send(p);
     }
   }
 
@@ -823,23 +825,14 @@ private:
 // Dispatch Link packets
 static class Link : public V2Link {
 public:
-  Link() : V2Link(NULL, &Socket) {}
+  Link() : V2Link(nullptr, &Socket) {}
 
 private:
-  V2MIDI::Packet _midi{};
-
   // Forward children device events to the host
-  void receiveSocket(V2Link::Packet* packet) override {
-    if (packet->getType() == V2Link::Packet::Type::MIDI) {
-      uint8_t address = packet->getAddress();
-      if (address == 0x0f)
-        return;
-
-      if (Device.usb.midi.connected()) {
-        packet->copyTo(_midi);
-        _midi.setPort(address + 1);
-        Device.usb.midi.send(&_midi);
-      }
+  void receiveSocket(V2Link::Packet& p) override {
+    if (p.type == V2Link::Packet::Type::MIDI) {
+      p.midi.port = p.address;
+      Device.usb.midi.send(p.midi);
     }
   }
 } Link;
