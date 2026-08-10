@@ -6,11 +6,11 @@
 #include <V2MIDI.h>
 #include <V2Music.h>
 
-V2DEVICE_METADATA("de.vogelkuerstner.pi-14537", 60, "versioduo:samd:control");
+V2DEVICE_METADATA("de.vogelkuerstner.pi-14537", 61, "versioduo:samd:control");
 
-static V2LED::WS2812 LED(2, PIN_LED_WS2812, &sercom2, SPI_PAD_0_SCK_1, PIO_SERCOM);
-static V2LED::WS2812 LEDExt(88, PIN_LED_WS2812_EXT, &sercom1, SPI_PAD_0_SCK_1, PIO_SERCOM);
-static V2Link::Port  Socket(&SerialSocket);
+static V2LED::WS2812<2>  LED(PIN_LED_WS2812, sercom2, SPI_PAD_0_SCK_1, PIO_SERCOM);
+static V2LED::WS2812<88> LEDExt(PIN_LED_WS2812_EXT, sercom1, SPI_PAD_0_SCK_1, PIO_SERCOM);
+static V2Link::Port      Socket(&SerialSocket);
 
 // The button switches the state with a multi-click long-press.
 static class Manual {
@@ -26,12 +26,12 @@ public:
     switch (_mode) {
       case Mode::Notes:
         LED.reset();
-        LED.setHSV(colour, 1, 0.25);
+        LED.hsv({colour, 1, 0.25});
         break;
 
       case Mode::Song:
         LED.reset();
-        LED.setBrightness(0.25);
+        LED.brightness(0.25);
         break;
 
       case Mode::Test:
@@ -41,13 +41,13 @@ public:
     }
   }
 
-  void setColour(V2Colour::Hue colour) {
+  void setColour(float colour) {
     LED.reset();
-    LED.setHSV(colour, 1, 0.25);
+    LED.hsv({colour, 1, 0.25});
   }
 
-  void splashColour(V2Colour::Hue colour) {
-    LED.splashHSV(0.5, colour, 1, 0.25);
+  void flashColour(float colour) {
+    LED.flash({colour, 1, 0.25}, 0.5);
   }
 
 private:
@@ -125,7 +125,7 @@ public:
 
       case Manual::Mode::Song:
       case Manual::Mode::Test:
-        Manual.splashColour(_programs[(uint8_t)_channels[channel].program].colour);
+        Manual.flashColour(_programs[(uint8_t)_channels[channel].program].colour);
         break;
     }
   }
@@ -211,8 +211,8 @@ private:
   float                 _rainbow{};
 
   const struct {
-    const char*   name;
-    V2Colour::Hue colour;
+    const char* name;
+    float       colour;
   } _programs[(uint8_t)Program::_count]{
     [(uint8_t)Program::Standard]    = {.name{"Standard"}, .colour{V2Colour::Orange}},
     [(uint8_t)Program::Damper]      = {.name{"Damper"}, .colour{V2Colour::Cyan}},
@@ -244,7 +244,6 @@ private:
 
   void handleInit() override {
     if (usb.ports.enableAccess) {
-      usb.midi.setPortName(1, "control");
       usb.midi.setPortName(2, "pulse 01");
       usb.midi.setPortName(3, "pulse 02");
       usb.midi.setPortName(4, "pulse 03");
@@ -330,12 +329,12 @@ private:
   void light(uint8_t channel, uint8_t index, uint8_t velocity) {
     if (velocity > 0) {
       // Brightness depending on the velocity
-      const float fraction   = (float)velocity / 127.f;
-      const float brightness = 0.5f + (0.5f * fraction);
-      LEDExt.setHSV(index, _channels[channel].led.h, _channels[channel].led.s, _channels[channel].led.v * brightness);
+      float fraction{(float)velocity / 127.f};
+      float brightness{0.5f + (0.5f * fraction)};
+      LEDExt.hsv({_channels[channel].led.h, _channels[channel].led.s, _channels[channel].led.v * brightness}, index);
 
     } else {
-      LEDExt.setBrightness(index, 0);
+      LEDExt.brightness(0, index);
     }
   }
 
@@ -949,9 +948,9 @@ private:
 void setup() {
   Serial.begin(9600);
   LED.begin();
-  LED.setMaxBrightness(0.5);
+  LED.brightnessMax(0.5);
   LEDExt.begin();
-  LEDExt.setMaxBrightness(0.75);
+  LEDExt.brightnessMax(0.75);
   Device.begin();
   Button.begin();
 
