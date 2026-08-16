@@ -6,11 +6,11 @@
 #include <V2MIDI.h>
 #include <V2Music.h>
 
-V2DEVICE_METADATA("de.vogelkuerstner.pi-14537", 61, "versioduo:samd:control");
+V2DEVICE_METADATA("de.vogelkuerstner.pi-14537", 62, "versioduo:samd:control");
 
 static V2LED::WS2812<2>  LED(PIN_LED_WS2812, sercom2, SPI_PAD_0_SCK_1, PIO_SERCOM);
 static V2LED::WS2812<88> LEDExt(PIN_LED_WS2812_EXT, sercom1, SPI_PAD_0_SCK_1, PIO_SERCOM);
-static V2Link::Port      Socket(&SerialSocket);
+static V2Link::Port      Socket(&SerialSocket, PIN_SERIAL_SOCKET_TX_ENABLE, "socket");
 
 // The button switches the state with a multi-click long-press.
 static class Manual {
